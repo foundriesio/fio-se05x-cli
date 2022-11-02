@@ -12,6 +12,9 @@
 #include "fio_util.h"
 #include "fio_ssl.h"
 
+#define PKCS11_OPTEE_UUID "724624e8-eace-5706-8f71-4b7d4367da36"
+#define OPTEE_STR "OP-TEE"
+
 #define CKM_EC_EDWARDS_KEY_PAIR_GEN		(0x1055UL)
 #define CKM_EC_MONTGOMERY_KEY_PAIR_GEN		(0x1056UL)
 #define CKK_EC_EDWARDS				(0x40UL)
@@ -73,6 +76,7 @@ static const struct ec_curve_info {
 static int get_optee_slot(CK_SLOT_ID *slot)
 {
 	CK_TOKEN_INFO token_info = { };
+	CK_SLOT_INFO slot_info = { };
 	CK_SLOT_ID_PTR slots = NULL;
 	CK_ULONG count = 0;
 	size_t i = 0;
@@ -96,10 +100,18 @@ static int get_optee_slot(CK_SLOT_ID *slot)
 	for (i = 0; i < count; i++) {
 		*slot = slots[i];
 
+		if (C_GetSlotInfo(*slot, &slot_info))
+			goto error;
+
+		if (!strstr((const char *)slot_info.slotDescription,
+			   PKCS11_OPTEE_UUID))
+			continue;
+
 		if (C_GetTokenInfo(*slot, &token_info))
 			goto error;
 
-		if (strstr((const char *)token_info.label, "OP-TEE"))
+		if (strstr((const char *)token_info.label,
+			   OPTEE_STR))
 			break;
 	}
 
