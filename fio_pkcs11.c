@@ -73,13 +73,34 @@ static const struct ec_curve_info {
 	{ NULL, NULL, NULL, 0, 0 },
 };
 
-static int get_optee_slot(CK_SLOT_ID *slot)
+static const char* p11_utf8_to_local(CK_UTF8CHAR *string, size_t len)
+{
+	static char buffer[512];
+	size_t n, m;
+
+	while (len && string[len - 1] == ' ')
+		len--;
+
+	for (n = m = 0; n < sizeof(buffer) - 1; n++) {
+		if (m >= len)
+			break;
+
+		buffer[n] = string[m++];
+	}
+
+	buffer[n] = '\0';
+
+	return buffer;
+}
+
+static int get_optee_slot(CK_SLOT_ID *slot, unsigned char *token_label)
 {
 	CK_TOKEN_INFO token_info = { };
 	CK_SLOT_INFO slot_info = { };
 	CK_SLOT_ID_PTR slots = NULL;
 	CK_ULONG count = 0;
 	size_t i = 0;
+	const char *p = NULL;
 
 	if (!slot)
 		return CKR_GENERAL_ERROR;
@@ -110,8 +131,13 @@ static int get_optee_slot(CK_SLOT_ID *slot)
 		if (C_GetTokenInfo(*slot, &token_info))
 			goto error;
 
-		if (strstr((const char *)token_info.label,
-			   OPTEE_STR))
+		p = p11_utf8_to_local(token_info.label,
+				      sizeof(token_info.label));
+
+		if (strncmp(p, (const char *)token_label, strlen(p)))
+			continue;
+
+		if (strstr((const char *)token_info.model, OPTEE_STR))
 			break;
 	}
 
@@ -133,8 +159,9 @@ static int put_optee_slot(void)
 	return C_Finalize(0) ? -1 : 0;
 }
 
-int fio_pkcs11_import_cert(unsigned char *id, unsigned char *label,
-			   unsigned char *der, size_t der_len)
+int fio_pkcs11_import_cert(unsigned char *token_label, unsigned char *id,
+			   unsigned char *label, unsigned char *der,
+			   size_t der_len)
 {
 	CK_SESSION_HANDLE session = CK_INVALID_HANDLE;
 	CK_OBJECT_CLASS cert_class = CKO_CERTIFICATE;
@@ -150,7 +177,7 @@ int fio_pkcs11_import_cert(unsigned char *id, unsigned char *label,
 	size_t nbr_attr = 0;
 	int ret = 0;
 
-	if (get_optee_slot(&slot))
+	if (get_optee_slot(&slot, token_label))
 		return -1;
 
 	if (C_OpenSession(slot, CKF_RW_SESSION | CKF_SERIAL_SESSION, NULL, 0,
@@ -211,8 +238,9 @@ out:
 	return ret;
 }
 
-int fio_pkcs11_import_key(unsigned char *nxp_id, unsigned char *id,
-			  unsigned char *pin, unsigned char *key_type)
+int fio_pkcs11_import_key(unsigned char *token_label, unsigned char *nxp_id,
+			  unsigned char *id, unsigned char *pin,
+			  unsigned char *key_type)
 {
 	CK_MECHANISM rsa_mechanism = { CKM_RSA_PKCS_KEY_PAIR_GEN, NULL, 0 };
 	CK_MECHANISM ecc_mechanism = { CKM_EC_KEY_PAIR_GEN, NULL, 0 };
@@ -249,7 +277,7 @@ int fio_pkcs11_import_key(unsigned char *nxp_id, unsigned char *id,
 	/* skip the mandatory "0x" in the string */
 	sprintf(key_name, str, nxp_id + 2);
 
-	if (get_optee_slot(&slot))
+	if (get_optee_slot(&slot, token_label))
 		return -1;
 
 	if (C_OpenSession(slot, CKF_RW_SESSION | CKF_SERIAL_SESSION, NULL, 0,

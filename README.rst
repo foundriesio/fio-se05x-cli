@@ -5,7 +5,7 @@ Foundries.io NXP SE05X Secure Element CLI
 Intro and Usage
 ----------------
 
-This Secured Utility currently allows the user to import pre-provisioned certificates from the NXP SE050/51 via OP-TEE into the pkcs11 database.
+This Secured Utility currently allows the user to import pre-provisioned certificates from the NXP SE050/51 via OP-TEE into the pkcs#11 database associated to one of its tokens.
 
 If SCP03 was enabled, OP-TEE will take care of encrypt/decrypt and MAC authenticate the APDUs shared between the processor and the secure element.
 
@@ -43,17 +43,17 @@ For example if OP-TEE configured CFG_CORE_SE05X_I2C_BUS=6, the Linux kernel dts 
 Examples of usage
 -----------------
 
-* Import NXP SE051 Certficate with the id 0xf0000123 into OP-TEE pkcs#11 storage::
+* Import NXP SE051 Certficate with the id 0xf0000123 into OP-TEE pkcs#11 'aktualizr' token storage::
   
-    fio-se05x-cli --import-cert 0xf0000123 --id 45 --label fio
+    fio-se05x-cli --token-label aktualizr --import-cert 0xf0000123 --id 45 --label fio
 
 * Show NXP SE050 Certficate with the id 0xf0000123 on the console::
   
     fio-se05x-cli --show-cert 0xf0000123 --se050
 
-* Import NXP SE051 RSA:2048 bits key with the id 0xf0000123 into OP-TEE pkcs#11 storage::
+* Import NXP SE051 RSA:2048 bits key with the id 0xf0000123 into OP-TEE pkcs#11 'aktualizr' token storage::
   
-    fio-se05x-cli --import-key 0xf0000123 --id 45 --key-type RSA:2048 --pin 87654321
+    fio-se05x-cli --token-label aktualizr --import-key 0xf0000123 --id 45 --key-type RSA:2048 --pin 87654321
 
 
 Use the optional --se050 if the device is an SE050

@@ -253,8 +253,8 @@ static int get_certificate(uint32_t oid, unsigned char **der, size_t *der_len)
 	return 0;
 }
 
-static int do_certificate(bool import, bool show, uint32_t nxp,
-			  unsigned char *id, unsigned char *label)
+static int do_certificate(bool import, bool show, unsigned char *token,
+			  uint32_t nxp, unsigned char *id, unsigned char *label)
 {
 	unsigned char *der = NULL;
 	size_t der_len = 0;
@@ -266,7 +266,7 @@ static int do_certificate(bool import, bool show, uint32_t nxp,
 	}
 
 	if (import) {
-		ret = fio_pkcs11_import_cert(id, label, der, der_len);
+		ret = fio_pkcs11_import_cert(token, id, label, der, der_len);
 		if (ret)
 			fprintf(stderr, "Import certificate error %d\n", ret);
 	}
@@ -282,8 +282,9 @@ static int do_certificate(bool import, bool show, uint32_t nxp,
 	return ret;
 }
 
-static int do_key(unsigned char *nxp_id, unsigned char *id,
-		  unsigned char *pin, unsigned char *key_type)
+static int do_key(unsigned char *token, unsigned char *nxp_id,
+		  unsigned char *id, unsigned char *pin,
+		  unsigned char *key_type)
 {
 	uint32_t oid = strtoul((char *)nxp_id, NULL, 16);
 	bool is_binary = false;
@@ -305,7 +306,7 @@ static int do_key(unsigned char *nxp_id, unsigned char *id,
 		return -EINVAL;
 	}
 
-	if (fio_pkcs11_import_key(nxp_id, id, pin, key_type)) {
+	if (fio_pkcs11_import_key(token, nxp_id, id, pin, key_type)) {
 		fprintf(stderr, "Error importing the key\n");
 		return -EINVAL;
 	}
@@ -321,49 +322,55 @@ static const struct option options[] = {
 		.flag = NULL,
 	},
 	{
-#define import_key_opt 1
+#define token_label_opt 1
+		.name = "token-label",
+		.has_arg = 1,
+		.flag = NULL,
+	},
+	{
+#define import_key_opt 2
 		.name = "import-key",
 		.has_arg = 1,
 		.flag = NULL,
 	},
 	{
-#define import_cert_opt 2
+#define import_cert_opt 3
 		.name = "import-cert",
 		.has_arg = 1,
 		.flag = NULL,
 	},
 	{
-#define show_cert_opt 3
+#define show_cert_opt 4
 		.name = "show-cert",
 		.has_arg = 1,
 		.flag = NULL,
 	},
 	{
-#define id_opt 4
+#define id_opt 5
 		.name = "id",
 		.has_arg = 1,
 		.flag = NULL,
 	},
 	{
-#define pin_opt 5
+#define pin_opt 6
 		.name = "pin",
 		.has_arg = 1,
 		.flag = NULL,
 	},
 	{
-#define label_opt 6
+#define label_opt 7
 		.name = "label",
 		.has_arg = 1,
 		.flag = NULL,
 	},
 	{
-#define key_type_opt 7
+#define key_type_opt 8
 		.name = "key-type",
 		.has_arg = 1,
 		.flag = NULL,
 	},
 	{
-#define se050_opt 8
+#define se050_opt 9
 		.name = "se050",
 		.has_arg = 0,
 		.flag = NULL,
@@ -383,6 +390,7 @@ static void usage(void)
 	fprintf(stderr, "--help \t\tDisplay this menu\n\n");
 
 	fprintf(stderr, "Import an RSA or an EC Key to the PKCS#11 OP-TEE token:\n"
+		"\t--token-label <arg>\tThe PKCS#11 token to use\n"
 		"\t--import-key <arg>\tThe Secure Element object identifier, i.e: 0xF0000000\n"
 		"\t--pin <arg>\t\tUser PIN\n"
 		"\t--id <arg>>\t\tID of the object\n"
@@ -390,6 +398,7 @@ static void usage(void)
 		"\t[--se050]\t\tSet if the element is an SE050\n\n");
 
 	fprintf(stderr, "Import a Certificate to the PKCS#11 OP-TEE token:\n"
+		"\t--token-label <arg>\tThe PKCS#11 token to use\n"
 		"\t--import-cert <arg>\tThe Secure Element object identifier, i.e: 0xF0000000\n"
 		"\t--id <arg>\n"
 		"\t--label <arg>\n "
@@ -403,6 +412,7 @@ static void usage(void)
 int main(int argc, char *argv[])
 {
 	unsigned char *label = NULL, *pin = NULL, *id = NULL, *nxp_id = NULL;
+	unsigned char *token = NULL;
 	unsigned char *key_type = NULL;
 	bool do_import_cert = false;
 	bool do_import_key = false;
@@ -426,6 +436,9 @@ int main(int argc, char *argv[])
 		case help_opt:
 			usage();
 			exit(0);
+		case token_label_opt:
+			token = (unsigned char *)optarg;
+			break;
 		case import_key_opt:
 			do_import_key = true;
 			nxp_id = (unsigned char *)optarg;
@@ -461,14 +474,14 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if ((do_import_cert && id && nxp_id && label) ||
+	if ((do_import_cert && id && nxp_id && label && token) ||
 	    (do_show_cert && nxp_id))
-		return do_certificate(do_import_cert, do_show_cert,
+		return do_certificate(do_import_cert, do_show_cert, token,
 				      strtoul((char *)nxp_id, NULL, 16),
 				      id, label);
 
-	if (do_import_key && id && pin && nxp_id && key_type)
-		return do_key(nxp_id, id, pin, key_type);
+	if (do_import_key && id && pin && nxp_id && key_type && token)
+		return do_key(token, nxp_id, id, pin, key_type);
 
 	usage();
 	exit(1);
