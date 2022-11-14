@@ -12,6 +12,7 @@ int tlvGet_u8buf(uint32_t tag, size_t *index, uint8_t *buf, size_t len,
 		 uint8_t *rsp, size_t *olen);
 int tlvGet_u8(uint32_t tag, size_t *index, uint8_t *buf, size_t buf_len,
 	      uint8_t *rsp);
+int tlvSet_u8(uint32_t tag, uint8_t **buf, size_t *len, uint8_t value);
 int tlvGet_u16(uint32_t tag, size_t *index, uint8_t *buf, size_t buf_len,
 	       uint16_t *rsp);
 int tlvSet_u16(uint32_t tag, uint8_t **buf, size_t *len, uint16_t value);

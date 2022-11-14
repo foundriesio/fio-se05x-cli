@@ -112,7 +112,7 @@ error:
 	return -EINVAL;
 }
 
-static int object_type(uint32_t oid, bool *is_binary)
+static int object_type(uint32_t oid, uint32_t *oid_type, bool *is_binary)
 {
 	uint8_t hdr[] = SE05X_OBJ_TYPE_HEADER;
 	uint8_t *cmd = malloc(BUF_SIZE_CMD);
@@ -144,7 +144,55 @@ static int object_type(uint32_t oid, bool *is_binary)
 		goto error;
 	}
 
-	*is_binary = type == 0x0B ? true : false;
+	if (is_binary)
+		*is_binary = type ==  BINARY_FILE ? true : false;
+
+	if (oid_type)
+		*oid_type = type;
+
+	free(cmd);
+	free(rsp);
+
+	return 0;
+error:
+	free(cmd);
+	free(rsp);
+
+	return -EINVAL;
+}
+
+static int object_list(uint8_t *list, size_t *list_len)
+{
+	uint8_t hdr[] = SE05X_OBJ_GET_LIST;
+	uint8_t *cmd = malloc(BUF_SIZE_CMD);
+	uint8_t *rsp = malloc(BUF_SIZE_RSP);
+	uint8_t *p = cmd;
+	size_t rsp_len = BUF_SIZE_RSP;
+	size_t rsp_idx = 0;
+	size_t cmd_len = 0;
+	uint8_t more = 0;
+
+	if (tlvSet_u16(SE05x_TAG_1, &p, &cmd_len, 0))
+		goto error;
+
+	if (tlvSet_u8(SE05x_TAG_2, &p, &cmd_len, 0xff))
+		goto error;
+
+	if (se_apdu_request(SE_APDU_CASE_4E,
+			    hdr, sizeof(hdr),
+			    cmd, cmd_len,
+			    rsp, &rsp_len)) {
+		fprintf(stderr, "Error, cant communicate with TEE core\n");
+		goto error;
+	}
+
+	if (tlvGet_u8(SE05x_TAG_1, &rsp_idx, rsp, rsp_len, &more))
+		goto error;
+
+	if (tlvGet_u8buf(SE05x_TAG_2, &rsp_idx, rsp, rsp_len, list, list_len)) {
+		fprintf(stderr, "Error, cant get the list\n");
+		goto error;
+	}
 
 	free(cmd);
 	free(rsp);
@@ -216,7 +264,7 @@ static int get_certificate(uint32_t oid, unsigned char **der, size_t *der_len)
 		return -EINVAL;
 	}
 
-	if (object_type(oid, &is_binary) || !is_binary) {
+	if (object_type(oid, NULL, &is_binary) || !is_binary) {
 		fprintf(stderr,"Error, not binary type!\n");
 		return -EINVAL;
 	}
@@ -296,7 +344,7 @@ static int do_key(unsigned char *token, unsigned char *nxp_id,
 		return -EINVAL;
 	}
 
-	if (object_type(oid, &is_binary) || is_binary) {
+	if (object_type(oid, NULL, &is_binary) || is_binary) {
 		fprintf(stderr, "Error, binary type!\n");
 		return -EINVAL;
 	}
@@ -310,6 +358,43 @@ static int do_key(unsigned char *token, unsigned char *nxp_id,
 		fprintf(stderr, "Error importing the key\n");
 		return -EINVAL;
 	}
+
+	return 0;
+}
+
+static int do_list(void)
+{
+	uint8_t *list = malloc(4096);
+	size_t length = 4096;
+	uint32_t type = 0;
+	uint16_t size = 0;
+	char *name = NULL;
+
+	if (object_list(list, &length)) {
+		free(list);
+
+		return -EINVAL;
+	}
+
+	for (size_t i = 0; i < length; i += 4) {
+		uint32_t id = (list[i + 0] << (3 * 8)) |
+			      (list[i + 1] << (2 * 8)) |
+			      (list[i + 2] << (1 * 8)) |
+			      (list[i + 3] << (0 * 8));
+
+		if (object_type(id, &type, NULL))
+			continue;
+
+		name = get_name(type);
+
+		if (object_size(id, &size))
+			continue;
+
+		fprintf(stderr, "Key-Id: 0x%x\t%-30s [%5d bits]\n",
+			id, name, 8 *size);
+	}
+
+	free(list);
 
 	return 0;
 }
@@ -370,7 +455,13 @@ static const struct option options[] = {
 		.flag = NULL,
 	},
 	{
-#define se050_opt 9
+#define list_objects_opt 9
+		.name = "list-objects",
+		.has_arg = 0,
+		.flag = NULL,
+	},
+	{
+#define se050_opt 10
 		.name = "se050",
 		.has_arg = 0,
 		.flag = NULL,
@@ -407,6 +498,10 @@ static void usage(void)
 	fprintf(stderr, "Read a Certificate to the console:\n"
 		"\t--show-cert <arg>\tThe Secure Element object identifier, i.e: 0xF0000000\n"
 		"\t[--se050]\n\n");
+
+	fprintf(stderr, "List all objects available in the Secure Element NVM:\n"
+		"\t--list-objects\\n"
+		"\t[--se050]\n\n");
 }
 
 int main(int argc, char *argv[])
@@ -414,6 +509,7 @@ int main(int argc, char *argv[])
 	unsigned char *label = NULL, *pin = NULL, *id = NULL, *nxp_id = NULL;
 	unsigned char *token = NULL;
 	unsigned char *key_type = NULL;
+	bool do_list_objects = false;
 	bool do_import_cert = false;
 	bool do_import_key = false;
 	bool do_show_cert = false;
@@ -463,6 +559,9 @@ int main(int argc, char *argv[])
 		case key_type_opt:
 			key_type = (unsigned char *)optarg;
 			break;
+		case list_objects_opt:
+			do_list_objects = true;
+			break;
 		case se050_opt:
 			BUF_SIZE_CMD = SE050_MAX_BUF_SIZE_CMD;
 			BUF_SIZE_RSP = SE050_MAX_BUF_SIZE_RSP;
@@ -474,6 +573,9 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	if (do_list_objects)
+		return do_list();
+
 	if ((do_import_cert && id && nxp_id && label && token) ||
 	    (do_show_cert && nxp_id))
 		return do_certificate(do_import_cert, do_show_cert, token,
@@ -484,5 +586,6 @@ int main(int argc, char *argv[])
 		return do_key(token, nxp_id, id, pin, key_type);
 
 	usage();
+
 	exit(1);
 }

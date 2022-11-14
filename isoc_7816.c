@@ -107,6 +107,24 @@ int tlvGet_u16(uint32_t tag, size_t *index, uint8_t *buf, size_t buf_len,
 	return 0;
 }
 
+
+int tlvSet_u8(uint32_t tag, uint8_t **buf, size_t *len, uint8_t value)
+{
+	const size_t size_of_tlv = 1 + 1 + 1;
+	uint8_t *p = *buf;
+
+	if (size_of_tlv + *len > TLV_SIZE_CMD)
+		return -EINVAL;
+
+	*p++ = tag;
+	*p++ = 1;
+	*p++ = value;
+	*buf = p;
+	*len += size_of_tlv;
+
+	return 0;
+}
+
 int tlvSet_u16(uint32_t tag, uint8_t **buf, size_t *len, uint16_t value)
 {
 	const size_t size_of_tlv = 1 + 1 + 2;
