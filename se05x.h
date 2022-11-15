@@ -6,6 +6,11 @@
 #ifndef SE05X_H
 #define SE05X_H
 
+/* OP-TEE: range of values created by the OP-TEE driver */
+#define TEE_OID_MIN	((uint32_t)(0x00000001))
+#define TEE_OID_MAX	((uint32_t)(TEE_OID_MIN + 0x7BFFFFFE))
+#define TEE_OID(x)	(bool)(((x) >= TEE_OID_MIN) && ((x) <= TEE_OID_MAX))
+
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof(array[0]))
 #define STRX(x) #x
 #define STR(x) STRX(x)

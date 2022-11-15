@@ -390,8 +390,8 @@ static int do_list(void)
 		if (object_size(id, &size))
 			continue;
 
-		fprintf(stderr, "Key-Id: 0x%x\t%-30s [%5d bits]\n",
-			id, name, 8 *size);
+		fprintf(stderr, "Key-Id: 0x%x\t%-30s [%5d bits] %c\n",
+			id, name, 8 *size, TEE_OID(id) ? '*' : ' ');
 	}
 
 	free(list);
