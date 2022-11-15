@@ -23,7 +23,6 @@
 #define FILL_ATTR(attr, typ, val, len) \
 	{ (attr).type = (typ); (attr).pValue = (val); (attr).ulValueLen = len; }
 
-
 static const struct ec_curve_info {
 	const char *name;
 	const char *oid;

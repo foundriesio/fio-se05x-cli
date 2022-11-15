@@ -107,7 +107,6 @@ int tlvGet_u16(uint32_t tag, size_t *index, uint8_t *buf, size_t buf_len,
 	return 0;
 }
 
-
 int tlvSet_u8(uint32_t tag, uint8_t **buf, size_t *len, uint8_t value)
 {
 	const size_t size_of_tlv = 1 + 1 + 1;

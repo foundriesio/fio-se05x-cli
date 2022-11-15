@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "fio_pkcs11.h"
@@ -101,6 +102,40 @@ static int object_size(uint32_t oid, uint16_t *len)
 		fprintf(stderr,"error, cant get response\n");
 		goto error;
 	}
+	free(cmd);
+	free(rsp);
+
+	return 0;
+error:
+	free(cmd);
+	free(rsp);
+
+	return -EINVAL;
+}
+
+static int object_delete(uint32_t oid)
+{
+	uint8_t hdr[] = SE05X_OBJ_DEL_HEADER;
+	uint8_t *cmd = malloc(BUF_SIZE_CMD);
+	uint8_t *rsp = malloc(BUF_SIZE_RSP);
+	uint8_t *p = cmd;
+	size_t rsp_len = BUF_SIZE_RSP;
+	size_t cmd_len = 0;
+
+	if (!cmd || !rsp)
+		return -ENOMEM;
+
+	if (tlvSet_u32(SE05x_TAG_1, &p, &cmd_len, oid)) {
+		fprintf(stderr, "error, cant form command\n");
+		goto error;
+	}
+
+	if (se_apdu_request(SE_APDU_CASE_3,
+			    hdr, sizeof(hdr),
+			    cmd, cmd_len,
+			    rsp, &rsp_len))
+		goto error;
+
 	free(cmd);
 	free(rsp);
 
@@ -393,6 +428,37 @@ static int do_list(void)
 	return 0;
 }
 
+static int do_delete(unsigned char *nxp_id)
+{
+	uint8_t *list = malloc(4096);
+	uint32_t *p = (uint32_t *)list;
+	size_t length = 4096;
+	uint32_t oid = 0;
+
+	if (strncmp((char *)nxp_id, "all", strlen("all")))
+		oid = strtoul((char *)nxp_id, NULL, 16);
+
+	if (object_list(list, &length)) {
+		free(list);
+		return -EINVAL;
+	}
+
+	for (size_t i = 0; i < length / sizeof(uint32_t); i++, p++) {
+		uint32_t id = bswap32(*p);
+
+		/* Only objects created by the OP-TEE driver */
+		if (!TEE_OID(id) || (oid && (oid != id)))
+		    continue;
+
+		fprintf(stderr, "Key-Id: 0x%x [%s]\n", id,
+			object_delete(id) ?  "delete error" : "deleted");
+	}
+
+	free(list);
+
+	return 0;
+}
+
 static const struct option options[] = {
 	{
 #define help_opt 0
@@ -455,7 +521,13 @@ static const struct option options[] = {
 		.flag = NULL,
 	},
 	{
-#define se050_opt 10
+#define delete_objects_opt 10
+		.name = "delete-objects",
+		.has_arg = 1,
+		.flag = NULL,
+	},
+	{
+#define se050_opt 11
 		.name = "se050",
 		.has_arg = 0,
 		.flag = NULL,
@@ -496,6 +568,12 @@ static void usage(void)
 	fprintf(stderr, "List all objects available in the Secure Element NVM:\n"
 		"\t--list-objects\\n"
 		"\t[--se050]\n\n");
+
+	fprintf(stderr, "Delete OP-TEE created objects from the Secure Element NVM:\n"
+		"\t--delete-objects <arg>\tEither an object identifier to delete a single element (i.e: 0xF0000000) or \"all\" (to delete all)\n"
+		"\t[--se050]\n\n");
+
+
 }
 
 int main(int argc, char *argv[])
@@ -503,6 +581,7 @@ int main(int argc, char *argv[])
 	unsigned char *label = NULL, *pin = NULL, *id = NULL, *nxp_id = NULL;
 	unsigned char *token = NULL;
 	unsigned char *key_type = NULL;
+	bool do_delete_objects = false;
 	bool do_list_objects = false;
 	bool do_import_cert = false;
 	bool do_import_key = false;
@@ -556,6 +635,10 @@ int main(int argc, char *argv[])
 		case list_objects_opt:
 			do_list_objects = true;
 			break;
+		case delete_objects_opt:
+			do_delete_objects = true;
+			nxp_id = (unsigned char *)optarg;
+			break;
 		case se050_opt:
 			BUF_SIZE_CMD = SE050_MAX_BUF_SIZE_CMD;
 			BUF_SIZE_RSP = SE050_MAX_BUF_SIZE_RSP;
@@ -569,6 +652,9 @@ int main(int argc, char *argv[])
 
 	if (do_list_objects)
 		return do_list();
+
+	if (do_delete_objects)
+		return do_delete(nxp_id);
 
 	if ((do_import_cert && id && nxp_id && label && token) ||
 	    (do_show_cert && nxp_id))
