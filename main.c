@@ -368,30 +368,24 @@ static int do_list(void)
 	size_t length = 4096;
 	uint32_t type = 0;
 	uint16_t size = 0;
-	char *name = NULL;
+	uint32_t *p = (uint32_t *)list;
 
 	if (object_list(list, &length)) {
 		free(list);
-
 		return -EINVAL;
 	}
 
-	for (size_t i = 0; i < length; i += 4) {
-		uint32_t id = (list[i + 0] << (3 * 8)) |
-			      (list[i + 1] << (2 * 8)) |
-			      (list[i + 2] << (1 * 8)) |
-			      (list[i + 3] << (0 * 8));
+	for (size_t i = 0; i < length / sizeof(uint32_t); i++, p++) {
+		uint32_t id = bswap32(*p);
 
 		if (object_type(id, &type, NULL))
 			continue;
-
-		name = get_name(type);
 
 		if (object_size(id, &size))
 			continue;
 
 		fprintf(stderr, "Key-Id: 0x%x\t%-30s [%5d bits] %c\n",
-			id, name, 8 *size, TEE_OID(id) ? '*' : ' ');
+			id, get_name(type), 8 * size, TEE_OID(id) ? '*' : ' ');
 	}
 
 	free(list);
