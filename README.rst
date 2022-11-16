@@ -5,7 +5,7 @@ Foundries.io NXP SE05X Secure Element CLI
 Intro and Usage
 ----------------
 
-This Secured Utility currently allows the user to import pre-provisioned certificates from the NXP SE050/51 via OP-TEE into the pkcs#11 database associated to one of its tokens.
+This Secured Utility currently allows the user to import pre-provisioned certificates from the NXP SE050/51 via OP-TEE into the pkcs#11 database associated to one of its tokens. It also allows the user to list all objects stored in the NXP SE05X non volatile memory (NVM) and to delete those objects that were created by the Secure World (not the pre-provisioned objects)
 
 If SCP03 was enabled, OP-TEE will take care of encrypt/decrypt and MAC authenticate the APDUs shared between the processor and the secure element.
 
@@ -54,6 +54,16 @@ Examples of usage
 * Import NXP SE051 RSA:2048 bits key with the id 0xf0000123 into OP-TEE pkcs#11 'aktualizr' token storage::
   
     fio-se05x-cli --token-label aktualizr --import-key 0xf0000123 --id 45 --key-type RSA:2048 --pin 87654321
+    
+* List objects::
+  
+    fio-se05x-cli --list-objects
+
+* Delete objects::
+  
+    fio-se05x-cli --delete-objects all
+    fio-se05x-cli --delete-objects 0x67981234
+
 
 
 Use the optional --se050 if the device is an SE050
