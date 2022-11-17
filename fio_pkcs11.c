@@ -12,7 +12,7 @@
 #include "fio_util.h"
 #include "fio_ssl.h"
 
-#define PKCS11_OPTEE_UUID "724624e8-eace-5706-8f71-4b7d4367da36"
+#define PKCS11_OPTEE_MANUFACTURER "Linaro"
 #define OPTEE_STR "OP-TEE"
 
 #define CKM_EC_EDWARDS_KEY_PAIR_GEN		(0x1055UL)
@@ -124,7 +124,7 @@ static int get_optee_slot(CK_SLOT_ID *slot, unsigned char *token_label)
 			goto error;
 
 		if (!strstr((const char *)slot_info.slotDescription,
-			   PKCS11_OPTEE_UUID))
+			   PKCS11_OPTEE_MANUFACTURER))
 			continue;
 
 		if (C_GetTokenInfo(*slot, &token_info))
