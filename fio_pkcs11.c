@@ -15,9 +15,15 @@
 #define PKCS11_OPTEE_MANUFACTURER "Linaro"
 #define OPTEE_STR "OP-TEE"
 
+#ifndef CKM_EC_EDWARDS_KEY_PAIR_GEN
 #define CKM_EC_EDWARDS_KEY_PAIR_GEN		(0x1055UL)
-#define CKM_EC_MONTGOMERY_KEY_PAIR_GEN		(0x1056UL)
+#endif
+
+#ifndef CKK_EC_EDWARDS
 #define CKK_EC_EDWARDS				(0x40UL)
+#endif
+
+#define CKM_EC_MONTGOMERY_KEY_PAIR_GEN		(0x1056UL)
 #define CKK_EC_MONTGOMERY			(0x41UL)
 
 #define FILL_ATTR(attr, typ, val, len) \
