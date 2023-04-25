@@ -437,25 +437,89 @@ static int do_delete(unsigned char *nxp_id)
 	uint8_t *list = malloc(4096);
 	uint32_t *p = (uint32_t *)list;
 	size_t length = 4096;
+	bool reset = false;
+	bool all = false;
 	uint32_t oid = 0;
+	int err = 0;
+	int cnt = 0;
 
-	if (strncmp((char *)nxp_id, "all", strlen("all")))
-		oid = strtoul((char *)nxp_id, NULL, 16);
+	/* Factory reset */
+	reset = !!!strncmp((char *)nxp_id, "reset", strlen("reset"));
 
+	if (reset)
+		goto init;
+
+	/* Every TEE created objects */
+	all = !!!strncmp((char *)nxp_id, "all", strlen("all"));
+	if (all)
+		goto init;
+
+	/* One TEE created object*/
+	oid = strtoul((char *)nxp_id, NULL, 16);
+
+	if (TEE_OID(oid))
+		goto init;
+
+	fprintf(stderr, "Invalid object 0x%x, not in TEE range\n", oid);
+	return -EINVAL;
+
+init:
 	if (object_list(list, &length)) {
 		free(list);
 		return -EINVAL;
 	}
 
+	if (reset)
+		fprintf(stderr, "NXP SE05X Secure Element Factory Reset\n");
+
 	for (size_t i = 0; i < length / sizeof(uint32_t); i++, p++) {
 		uint32_t id = bswap32(*p);
 
-		/* Only objects created by the OP-TEE driver */
-		if (!TEE_OID(id) || (oid && (oid != id)))
-		    continue;
+		/* Everything must go */
+		if (reset)
+			goto delete;
 
-		fprintf(stderr, "Key-Id: 0x%x [%s]\n", id,
-			object_delete(id) ?  "delete error" : "deleted");
+		/*
+		 * Delete objects _only_ created by the OP-TEE crypto
+		 * driver.
+		 *
+		 * APDU PTA created objects (i.e. EL2G service) will not
+		 * be deleted without a --factory-reset
+		 */
+		if (all) {
+			if (TEE_OID(id))
+				goto delete;
+
+			continue;
+		}
+
+		/* OID specified in command line */
+		if (oid != id)
+			continue;
+delete:
+		err = object_delete(id);
+		if (!err)
+			cnt++;
+
+		fprintf(stderr, "Key-Id: 0x%x [%s] %s\n", id,
+			err ? (TEE_OID(id) ?  "delete error" : "persistent") :
+			 "deleted",
+			/* We should not fail deleting a TEE created object */
+			err && TEE_OID(id) ? "WARNING, OID in TEE range" : "");
+	}
+
+	if (reset || all)  {
+		fprintf(stderr, "\nRemoved %d objects\n", cnt);
+	} else {
+		/* Single object */
+		if (cnt)
+			fprintf(stderr, "\nObject Removed\n");
+		else if (!err)
+			fprintf(stderr, "\nObject %s, (oid 0x%x) not found\n",
+				nxp_id, oid);
+		else
+			fprintf(stderr, "\nObject %s can't be removed\n",
+				nxp_id);
 	}
 
 	free(list);
@@ -537,6 +601,12 @@ static const struct option options[] = {
 		.flag = NULL,
 	},
 	{
+#define factory_reset_opt 12
+		.name = "factory-reset",
+		.has_arg = 0,
+		.flag = NULL,
+	},
+	{
 		.name = NULL,
 	},
 };
@@ -570,11 +640,15 @@ static void usage(void)
 		"\t[--se050]\n\n");
 
 	fprintf(stderr, "List all objects available in the Secure Element NVM:\n"
-		"\t--list-objects\\n"
+		"\t--list-objects\n"
 		"\t[--se050]\n\n");
 
 	fprintf(stderr, "Delete OP-TEE created objects from the Secure Element NVM:\n"
 		"\t--delete-objects <arg>\tEither an object identifier to delete a single element (i.e: 0xF0000000) or \"all\" (to delete all)\n"
+		"\t[--se050]\n\n");
+
+	fprintf(stderr, "Reset the Secure Element to its Factory Settings. \n"
+		"\t--factory-reset \tThis option will delete OPTEE and EL2G created keys and certificates\n"
 		"\t[--se050]\n\n");
 
 
@@ -586,6 +660,7 @@ int main(int argc, char *argv[])
 	unsigned char *token = NULL;
 	unsigned char *key_type = NULL;
 	bool do_delete_objects = false;
+	bool do_factory_reset = false;
 	bool do_list_objects = false;
 	bool do_import_cert = false;
 	bool do_import_key = false;
@@ -648,6 +723,10 @@ int main(int argc, char *argv[])
 			BUF_SIZE_RSP = SE050_MAX_BUF_SIZE_RSP;
 			TLV_SIZE_CMD = SE050_MAX_BUF_SIZE_CMD;
 			break;
+		case factory_reset_opt:
+			do_factory_reset = true;
+			nxp_id = (unsigned char *)"reset";
+			break;
 		default:
 			usage();
 			exit(1);
@@ -657,7 +736,7 @@ int main(int argc, char *argv[])
 	if (do_list_objects)
 		return do_list();
 
-	if (do_delete_objects)
+	if (do_delete_objects || do_factory_reset)
 		return do_delete(nxp_id);
 
 	if ((do_import_cert && id && nxp_id && label && token) ||
