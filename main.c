@@ -412,12 +412,16 @@ static int do_list(void)
 
 	for (size_t i = 0; i < length / sizeof(uint32_t); i++, p++) {
 		uint32_t id = bswap32(*p);
+		size = 0;
 
 		if (object_type(id, &type, NULL))
 			continue;
 
-		if (object_size(id, &size))
+		if (memcmp(get_name(type), "UserID", sizeof(UserID))) {
+			/* UserID does not have a size */
+			if (object_size(id, &size))
 			continue;
+		}
 
 		fprintf(stderr, "Key-Id: 0x%x\t%-30s [%5d bits] %c\n",
 			id, get_name(type), 8 * size, TEE_OID(id) ? '*' : ' ');
