@@ -42,7 +42,7 @@ static int object_exist(uint32_t oid, bool *exist)
 		return -ENOMEM;
 
 	if (tlvSet_u32(SE05x_TAG_1, &p, &cmd_len, oid)) {
-		fprintf(stderr,"error, cant form command\n");
+		fprintf(stderr,"Error, cant form command\n");
 		goto error;
 	}
 
@@ -50,7 +50,7 @@ static int object_exist(uint32_t oid, bool *exist)
 			    hdr, sizeof(hdr),
 			    cmd, cmd_len,
 			    rsp, &rsp_len)) {
-		fprintf(stderr,"error, cant communicate with TEE core\n");
+		fprintf(stderr,"Error, cant communicate with TEE core\n");
 		goto error;
 	}
 
@@ -86,7 +86,7 @@ static int object_size(uint32_t oid, uint16_t *len)
 		return -ENOMEM;
 
 	if (tlvSet_u32(SE05x_TAG_1, &p, &cmd_len, oid)) {
-		fprintf(stderr,"error, cant form command\n");
+		fprintf(stderr,"Error, cant form command\n");
 		goto error;
 	}
 
@@ -94,12 +94,12 @@ static int object_size(uint32_t oid, uint16_t *len)
 			    hdr, sizeof(hdr),
 			    cmd, cmd_len,
 			    rsp, &rsp_len)) {
-		fprintf(stderr,"error, cant communicate with TEE core\n");
+		fprintf(stderr,"Error, cant communicate with TEE core\n");
 		goto error;
 	}
 
 	if (tlvGet_u16(SE05x_TAG_1, &rsp_idx, rsp, rsp_len, len)) {
-		fprintf(stderr,"error, cant get response\n");
+		fprintf(stderr,"Error, cant get response\n");
 		goto error;
 	}
 	free(cmd);
