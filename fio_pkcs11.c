@@ -4,6 +4,7 @@
  * Author: Jorge Ramirez-Ortiz <jorge@foundries.io>
  */
 #include <pkcs11.h>
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +26,56 @@
 
 #define CKM_EC_MONTGOMERY_KEY_PAIR_GEN		(0x1056UL)
 #define CKK_EC_MONTGOMERY			(0x41UL)
+
+struct fio_pkcs11_keys pkcs11_keys;
+size_t pkcs11_rsa_idx;
+size_t pkcs11_ec_idx;
+
+#define ARRAY_SIZE(array) (sizeof(array) / sizeof(array[0]))
+
+#define ATTR_METHOD(ATTR, TYPE)						\
+static TYPE get_##ATTR(CK_SESSION_HANDLE sess, CK_OBJECT_HANDLE obj)	\
+{									\
+	TYPE type = 0;							\
+	CK_ATTRIBUTE attr = { CKA_##ATTR, &type, sizeof(type) };	\
+									\
+	if (C_GetAttributeValue(sess, obj, &attr, 1))			\
+		fprintf(stderr, "C_GetAttributeValue(" #ATTR ")");	\
+	return type;							\
+}
+
+#define VARATTR_METHOD(ATTR, TYPE)					\
+static TYPE * get_##ATTR(CK_SESSION_HANDLE sess, CK_OBJECT_HANDLE obj,	\
+			 CK_ULONG_PTR pulCount)				\
+{									\
+	CK_ATTRIBUTE attr = { CKA_##ATTR, NULL, 0 };			\
+	CK_RV rv;							\
+	if (pulCount)							\
+		*pulCount = 0;						\
+	rv = C_GetAttributeValue(sess, obj, &attr, 1);	 		\
+	if (rv == CKR_OK) {						\
+		if (attr.ulValueLen == (CK_ULONG)(-1))			\
+			return NULL;					\
+		if (!(attr.pValue = calloc(1, attr.ulValueLen + 1)))	\
+			return NULL;					\
+		rv = C_GetAttributeValue(sess, obj, &attr, 1);		\
+		if (attr.ulValueLen == (CK_ULONG)(-1)) {		\
+			free(attr.pValue);				\
+			return NULL;					\
+		}							\
+		if (pulCount)						\
+			*pulCount = attr.ulValueLen / sizeof(TYPE);	\
+	} else if (rv != CKR_ATTRIBUTE_TYPE_INVALID) {			\
+		fprintf(stderr, "Invalid");				\
+	}								\
+	return (TYPE *) attr.pValue;					\
+}
+
+VARATTR_METHOD(EC_POINT, unsigned char);
+VARATTR_METHOD(LABEL, char);
+VARATTR_METHOD(MODULUS, CK_BYTE);
+ATTR_METHOD(KEY_TYPE, CK_KEY_TYPE);
+
 
 #define FILL_ATTR(attr, typ, val, len) \
 	{ (attr).type = (typ); (attr).pValue = (val); (attr).ulValueLen = len; }
@@ -424,3 +475,108 @@ out:
 
 	return ret;
 }
+
+int fio_pkcs11_create_key_list(unsigned char *token_label, unsigned char *pin)
+{
+	CK_SESSION_HANDLE session = CK_INVALID_HANDLE;
+	CK_OBJECT_HANDLE object;
+	CK_SLOT_ID slot = 0;
+	CK_ULONG count = 0;
+	int ret = -1;
+	CK_OBJECT_CLASS type = CKO_PRIVATE_KEY;
+	CK_ATTRIBUTE key_attr = {  CKA_CLASS, &type, sizeof(type)};
+
+	if (!token_label || !pin)
+		return 0;
+
+	if (get_optee_slot(&slot, token_label))
+		return ret;
+
+	if (C_OpenSession(slot, CKF_RW_SESSION | CKF_SERIAL_SESSION, NULL, 0,
+			  &session))
+		goto out;
+
+	if (C_Login(session, CKU_USER, pin, strlen((const char *)pin)))
+		goto out;
+
+	if (C_FindObjectsInit(session, &key_attr, 1))
+		goto out;
+
+	for (;;) {
+		struct fio_key_info *info = NULL;
+		unsigned char *bytes = NULL;
+		char *label = NULL;
+		CK_ULONG size = 0;
+
+		if (C_FindObjects(session, &object, 1, &count))
+			goto out;
+
+		if (!count)
+			break;
+
+		switch (get_KEY_TYPE(session, object)) {
+		case CKK_RSA:
+			label = get_LABEL(session, object, NULL);
+			bytes = get_MODULUS(session, object, &size);
+			if (pkcs11_rsa_idx >= ARRAY_SIZE(pkcs11_keys.rsa))
+				goto out;
+
+			if (bytes && size && label) {
+				info = calloc(1, sizeof(*info));
+				if (!info) goto out;
+
+				info->val = calloc(1, size);
+				if (!info->val) {
+					free(info);
+					goto out;
+				}
+
+				asprintf((char **)&info->label, "%s", label);
+				memcpy(info->val, bytes, size);
+				info->len = size;
+				/* populate info */
+				pkcs11_keys.rsa[pkcs11_rsa_idx++] = info;
+			}
+			break;
+		case CKK_EC:
+			label = get_LABEL(session, object, NULL);
+			bytes = get_EC_POINT(session, object, &size);
+			if (pkcs11_ec_idx >= ARRAY_SIZE(pkcs11_keys.ec))
+				goto out;
+
+			if (bytes && size && label) {
+				info = calloc(1, sizeof(*info));
+				if (!info)
+					goto out;
+
+				info->val = calloc(1, size);
+				if (!info->val) {
+					free(info);
+					goto out;
+				}
+
+				asprintf((char**) &info->label, "%s", label);
+				memcpy(info->val, bytes, size);
+				info->len = size;
+				/* populate info */
+				pkcs11_keys.ec[pkcs11_ec_idx++] = info;
+			}
+			break;
+		default:
+			break;
+		}
+	}
+
+	C_FindObjectsFinal(session);
+
+	ret = 0;
+out:
+	if (session && C_CloseSession(session))
+		ret = -1;
+
+	if (put_optee_slot())
+		ret = -1;
+
+	return ret;
+}
+

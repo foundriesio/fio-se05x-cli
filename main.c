@@ -3,6 +3,7 @@
  * Copyright (c) 2022, Foundries.io Ltd.
  * Author: Jorge Ramirez-Ortiz <jorge@foundries.io>
  */
+#define _GNU_SOURCE
 #include <err.h>
 #include <errno.h>
 #include <getopt.h>
@@ -287,6 +288,139 @@ error:
 	return -EINVAL;
 }
 
+static int object_rsa_get(uint32_t oid, uint16_t offset, uint16_t len,
+			  uint8_t *buf, size_t *buf_len)
+{
+	uint8_t hdr[] = SE05X_OBJ_GET_HEADER;
+	uint8_t *cmd = malloc(BUF_SIZE_CMD);
+	uint8_t *rsp = malloc(BUF_SIZE_RSP);
+	uint8_t *p = cmd;
+	size_t rsp_len = BUF_SIZE_RSP;
+	size_t rsp_idx = 0;
+	size_t cmd_len = 0;
+
+	if (!cmd || !rsp)
+		return -ENOMEM;
+
+	if (tlvSet_u32(SE05x_TAG_1, &p, &cmd_len, oid))
+		goto error;
+
+	if (offset && tlvSet_u16(SE05x_TAG_2, &p, &cmd_len, offset))
+		goto error;
+
+	if (len && tlvSet_u16(SE05x_TAG_3, &p, &cmd_len, len))
+		goto error;
+
+	/* RSA key component module */
+	if (tlvSet_u8(SE05x_TAG_4, &p, &cmd_len, 0x00))
+		goto error;
+
+	if (se_apdu_request(SE_APDU_CASE_4E,
+			    hdr, sizeof(hdr),
+			    cmd, cmd_len,
+			    rsp, &rsp_len)) {
+		fprintf(stderr, "Error, cant communicate with TEE core\n");
+		goto error;
+	}
+
+	if (tlvGet_u8buf(SE05x_TAG_1, &rsp_idx, rsp, rsp_len, buf, buf_len)) {
+		fprintf(stderr, ("Error, cant get the binary data\n"));
+		goto error;
+	}
+
+	free(cmd);
+	free(rsp);
+
+	return 0;
+error:
+	free(cmd);
+	free(rsp);
+
+	return -EINVAL;
+}
+
+
+static void get_ec_label(uint32_t oid, unsigned char **label, uint16_t len)
+{
+	unsigned char *buf = NULL;
+	size_t buf_len = 0;
+
+	/* increase for DER extra data */
+	buf_len = 10 * len;
+
+	buf = calloc(1, buf_len);
+	if (!buf) {
+		fprintf(stderr, "Error, not enough memory\n");
+		return;
+	}
+
+	if (object_get(oid, 0, 0, buf, &buf_len)) {
+		fprintf(stderr, "Object 0x%x cant be retrieved!\n", oid);
+		free(buf);
+		return;
+	}
+
+	/* Iterate through the pkcs11 key information */
+	for (size_t i = 0; i < pkcs11_ec_idx; i++) {
+		/*
+		 * WARNING:
+		 * Remove DER header info (might vary, 2 seems ok) !!
+		 */
+		if (memcmp(&pkcs11_keys.ec[i]->val[2], buf,
+			   pkcs11_keys.ec[i]->len)) continue;
+
+		asprintf((char **)label, "PKCS#11 Label: %s",
+			 pkcs11_keys.ec[i]->label);
+	}
+
+	free(buf);
+}
+
+static void get_rsa_label(uint32_t oid, unsigned char **label, uint16_t len)
+{
+	unsigned char *buf = NULL;
+	size_t buf_len = len;
+
+	buf = calloc(1, buf_len);
+	if (!buf) {
+		fprintf(stderr, "Error, not enough memory\n");
+		return;
+	}
+
+	if (object_rsa_get(oid, 0, 0, buf, &buf_len)) {
+		fprintf(stderr, "Object 0x%x cant be retrieved!\n", oid);
+		free(buf);
+		return;
+	}
+
+	/* Iterate through the pkcs11 key information */
+	for (size_t i = 0; i < pkcs11_rsa_idx; i++) {
+		if (memcmp(pkcs11_keys.rsa[i]->val, buf,
+			   pkcs11_keys.rsa[i]->len))
+			continue;
+
+		asprintf((char **)label, "PKCS#11 Label: %s",
+			 pkcs11_keys.rsa[i]->label);
+	}
+
+	free(buf);
+}
+
+static void get_pkcs11_label(uint32_t oid, uint32_t type, uint16_t len,
+			     unsigned char **label)
+{
+	switch (type) {
+	case EC_KEY_PAIR:
+		get_ec_label(oid, label, len);
+		break;
+	case RSA_KEY_PAIR:
+		get_rsa_label(oid, label, len);
+		break;
+	default:
+		break;
+	}
+}
+
 static int get_certificate(uint32_t oid, unsigned char **der, size_t *der_len)
 {
 	bool is_binary = false;
@@ -397,15 +531,22 @@ static int do_key(unsigned char *token, unsigned char *nxp_id,
 	return 0;
 }
 
-static int do_list(void)
+static int do_list(unsigned char *token_label, unsigned char *pin)
 {
 	uint8_t *list = malloc(4096);
 	size_t length = 4096;
 	uint32_t type = 0;
 	uint16_t size = 0;
 	uint32_t *p = (uint32_t *)list;
+	unsigned char *pkcs11_label = NULL;
+
+	if (fio_pkcs11_create_key_list(token_label, pin)) {
+		fprintf(stderr, "Cant create the pkcs11 EC/RSA list\n");
+		return -EINVAL;
+	}
 
 	if (object_list(list, &length)) {
+		fprintf(stderr, "Cant create the SE05X list\n");
 		free(list);
 		return -EINVAL;
 	}
@@ -417,14 +558,19 @@ static int do_list(void)
 		if (object_type(id, &type, NULL))
 			continue;
 
-		if (memcmp(get_name(type), "UserID", sizeof(UserID))) {
-			/* UserID does not have a size */
-			if (object_size(id, &size))
+		if ((type != UserID) && object_size(id, &size))
 			continue;
-		}
 
-		fprintf(stderr, "Key-Id: 0x%x\t%-30s [%5d bits] %c\n",
-			id, get_name(type), 8 * size, TEE_OID(id) ? '*' : ' ');
+		if (token_label && pin)
+			get_pkcs11_label(id, type, size, &pkcs11_label);
+
+		fprintf(stderr, "Key-Id: 0x%x\t%-20s [%5d bits] %c %s\n",
+			id, get_name(type), 8 * size,
+			TEE_OID(id) ? '*' : ' ',
+			pkcs11_label ? pkcs11_label : (unsigned char *)" ");
+
+		free(pkcs11_label);
+		pkcs11_label = NULL;
 	}
 
 	free(list);
@@ -639,8 +785,10 @@ static void usage(void)
 		"\t--show-cert <arg>\tThe Secure Element object identifier, i.e: 0xF0000000\n"
 		"\t[--se050]\n\n");
 
-	fprintf(stderr, "List all objects available in the Secure Element NVM:\n"
+	fprintf(stderr, "List all objects available in the Secure Element NVM and show their association with PKCS11 (optional):\n"
 		"\t--list-objects\n"
+		"\t[--token-label <arg>]\tThe PKCS#11 token to use (optional)\n"
+		"\t[--pin <arg>]\t\tUser PIN (optional)\n"
 		"\t[--se050]\n\n");
 
 	fprintf(stderr, "Delete OP-TEE created objects from the Secure Element NVM:\n"
@@ -734,7 +882,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (do_list_objects)
-		return do_list();
+		return do_list(token, pin);
 
 	if (do_delete_objects || do_factory_reset)
 		return do_delete(nxp_id);
