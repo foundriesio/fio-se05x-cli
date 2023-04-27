@@ -586,7 +586,7 @@ static int do_key(unsigned char *token, unsigned char *nxp_id,
 	return 0;
 }
 
-static int do_list(unsigned char *token_label, unsigned char *pin)
+static int do_list(unsigned char *nxp_id, unsigned char *token_label, unsigned char *pin)
 {
 	uint8_t *list = malloc(4096);
 	size_t length = 4096;
@@ -594,6 +594,10 @@ static int do_list(unsigned char *token_label, unsigned char *pin)
 	uint16_t size = 0;
 	uint32_t *p = (uint32_t *)list;
 	unsigned char *pkcs11_label = NULL;
+	uint32_t oid = strtoul((char *)nxp_id, NULL, 16);
+
+	if (!strncmp((char *)nxp_id, "all", strlen("all")))
+		oid = 0;
 
 	if (fio_pkcs11_create_key_list(token_label, pin)) {
 		fprintf(stderr, "Cant create the pkcs11 EC/RSA list\n");
@@ -609,6 +613,9 @@ static int do_list(unsigned char *token_label, unsigned char *pin)
 	for (size_t i = 0; i < length / sizeof(uint32_t); i++, p++) {
 		uint32_t id = bswap32(*p);
 		size = 0;
+
+		if (oid && (oid != id))
+			continue;
 
 		if (object_type(id, &type, NULL))
 			continue;
@@ -786,7 +793,7 @@ static const struct option options[] = {
 	{
 #define list_objects_opt 9
 		.name = "list-objects",
-		.has_arg = 0,
+		.has_arg = 1,
 		.flag = NULL,
 	},
 	{
@@ -841,7 +848,7 @@ static void usage(void)
 		"\t[--se050]\n\n");
 
 	fprintf(stderr, "List all objects available in the Secure Element NVM and show their association with PKCS11 (optional):\n"
-		"\t--list-objects\n"
+		"\t--list-objects <arg>\tEither an object identifier (i.e 0x50121331) or \"all\" to list all the objects\n"
 		"\t[--token-label <arg>]\tThe PKCS#11 token to use (optional)\n"
 		"\t[--pin <arg>]\t\tUser PIN (optional)\n"
 		"\t[--se050]\n\n");
@@ -916,6 +923,7 @@ int main(int argc, char *argv[])
 			break;
 		case list_objects_opt:
 			do_list_objects = true;
+			nxp_id = (unsigned char *)optarg;
 			break;
 		case delete_objects_opt:
 			do_delete_objects = true;
@@ -937,7 +945,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (do_list_objects)
-		return do_list(token, pin);
+		return do_list(nxp_id, token, pin);
 
 	if (do_delete_objects || do_factory_reset)
 		return do_delete(nxp_id);
