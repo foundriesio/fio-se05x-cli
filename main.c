@@ -705,6 +705,25 @@ init:
 		if (oid != id)
 			continue;
 delete:
+		/* Filter as per the Plug and Trust */
+		if (SE05X_OBJID_SE05X_APPLET_RES_START ==
+		    SE05X_OBJID_SE05X_APPLET_RES_MASK(id)) {
+			fprintf(stderr, "Not erasing 0x%08x (Reserved)\n", id);
+			continue;
+		} else if (EX_SSS_OBJID_DEMO_AUTH_START ==
+			   EX_SSS_OBJID_DEMO_AUTH_MASK(id)) {
+			fprintf(stderr, "Not erasing 0x%08x (Demo Auth)\n", id);
+			continue;
+		} else if (EX_SSS_OBJID_IOT_HUB_A_START ==
+			   EX_SSS_OBJID_IOT_HUB_A_MASK(id)) {
+			fprintf(stderr,"Not erasing 0x%08x (IoT Hub)\n", id);
+			continue;
+		} else if (!SE05X_OBJID_TP_MASK(id) && id) {
+			fprintf(stderr, "Not erasing Trust Provisioned objects"
+					"0x%08x\n", id);
+			continue;
+		}
+
 		err = object_delete(id);
 		if (!err)
 			cnt++;
