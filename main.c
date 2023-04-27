@@ -341,8 +341,8 @@ error:
 
 static void get_ec_label(uint32_t oid, unsigned char **label, uint16_t len)
 {
-	int found[100] = { [0 ... 99] = -1 };
 	char pad[4096] = { '\0' };
+	int found[100] = { };
 	unsigned char *buf = NULL;
 	size_t buf_len = 0;
 	uint32_t id = 0;
@@ -362,7 +362,6 @@ static void get_ec_label(uint32_t oid, unsigned char **label, uint16_t len)
 		free(buf);
 		return;
 	}
-
 	/* Iterate through the pkcs11 EC key information map */
 	for (size_t i = 0; i < pkcs11_ec_idx; i++) {
 		/*
@@ -376,7 +375,8 @@ static void get_ec_label(uint32_t oid, unsigned char **label, uint16_t len)
 		}
 
 		/* SE PKCS11 imported keys */
-		if (memcmp(pkcs11_keys.rsa[i]->label, "SE_", 3))
+		if (!pkcs11_keys.ec[i]->label ||
+		    memcmp(pkcs11_keys.ec[i]->label, "SE_", 3))
 			continue;
 
 		/*
@@ -405,8 +405,8 @@ static void get_ec_label(uint32_t oid, unsigned char **label, uint16_t len)
 
 static void get_rsa_label(uint32_t oid, unsigned char **label, uint16_t len)
 {
-	int found[100] = { [0 ... 99] = -1 };
 	char pad[4096] = { '\0' };
+	int found[100] = { };
 	unsigned char *buf = NULL;
 	size_t buf_len = len;
 	uint32_t id = 0;
@@ -433,7 +433,8 @@ static void get_rsa_label(uint32_t oid, unsigned char **label, uint16_t len)
 		}
 
 		/* SE PKCS11 imported keys */
-		if (memcmp(pkcs11_keys.rsa[i]->label, "SE_", 3))
+		if (!pkcs11_keys.rsa[i]->label ||
+		    memcmp(pkcs11_keys.rsa[i]->label, "SE_", 3))
 			continue;
 
 		/*
