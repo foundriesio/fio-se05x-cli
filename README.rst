@@ -59,16 +59,18 @@ Examples of usage
 
     fio-se05x-cli --token-label aktualizr --import-key 0xf0000123 --id 45 --key-type RSA:2048 --pin 87654321
 
-* List objects::
+* List NXP SE050 objects and optionally show any associated labels when they are being used by PKCS#11::
 
-    fio-se05x-cli --list-objects
+    fio-se05x-cli --list-objects all
+    fio-se05x-cli --list-objects 0xf0000123
+    fio-se05x-cli --list-objects all --token-label aktualizr --pin 87654321
+    fio-se05x-cli --list-objects 0xf0000123 --token-label aktualizr --pin 87654321
 
 * Delete objects::
 
     fio-se05x-cli --factory-reset
     fio-se05x-cli --delete-objects all
     fio-se05x-cli --delete-objects 0x67981234
-
 
 
 Use the optional --se050 if the device is an SE050
