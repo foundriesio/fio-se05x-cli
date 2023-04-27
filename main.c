@@ -311,7 +311,7 @@ static int object_rsa_get(uint32_t oid, uint16_t offset, uint16_t len,
 	if (len && tlvSet_u16(SE05x_TAG_3, &p, &cmd_len, len))
 		goto error;
 
-	/* RSA key component module */
+	/* RSA key component module = 0x00 */
 	if (tlvSet_u8(SE05x_TAG_4, &p, &cmd_len, 0x00))
 		goto error;
 
@@ -339,13 +339,16 @@ error:
 	return -EINVAL;
 }
 
-
 static void get_ec_label(uint32_t oid, unsigned char **label, uint16_t len)
 {
+	int found[100] = { [0 ... 99] = -1 };
+	char pad[4096] = { '\0' };
 	unsigned char *buf = NULL;
 	size_t buf_len = 0;
+	uint32_t id = 0;
+	size_t j = 0;
 
-	/* increase for DER extra data */
+	/* Increase for DER extra data */
 	buf_len = 10 * len;
 
 	buf = calloc(1, buf_len);
@@ -360,26 +363,54 @@ static void get_ec_label(uint32_t oid, unsigned char **label, uint16_t len)
 		return;
 	}
 
-	/* Iterate through the pkcs11 key information */
+	/* Iterate through the pkcs11 EC key information map */
 	for (size_t i = 0; i < pkcs11_ec_idx; i++) {
 		/*
 		 * WARNING:
 		 * Remove DER header info (might vary, 2 seems ok) !!
 		 */
-		if (memcmp(&pkcs11_keys.ec[i]->val[2], buf,
-			   pkcs11_keys.ec[i]->len)) continue;
+		if (!memcmp(&pkcs11_keys.ec[i]->val[2], buf,
+			    pkcs11_keys.ec[i]->len)) {
+			found[j++] = i;
+			continue;
+		}
 
-		asprintf((char **)label, "PKCS#11 Label: %s",
-			 pkcs11_keys.ec[i]->label);
+		/* SE PKCS11 imported keys */
+		if (memcmp(pkcs11_keys.rsa[i]->label, "SE_", 3))
+			continue;
+
+		/*
+		 * SE PKCS#11 imported keys must have SE_ in the label followed
+		 * by the OID
+		 */
+		id = strtoul((void *)(pkcs11_keys.ec[i]->label) + 3, NULL, 16);
+		if (oid == id)
+			found[j++] = i;
 	}
+
+	if (!j) {
+		free(buf);
+		return;
+	}
+
+	for (size_t i = 0; i < j; i++) {
+		strcat((char *)pad, (char *)pkcs11_keys.ec[found[i]]->label);
+		strcat(pad, ", ");
+	}
+
+	asprintf((char **)label, "PKCS#11 Label: %s", pad);
 
 	free(buf);
 }
 
 static void get_rsa_label(uint32_t oid, unsigned char **label, uint16_t len)
 {
+	int found[100] = { [0 ... 99] = -1 };
+	char pad[4096] = { '\0' };
 	unsigned char *buf = NULL;
 	size_t buf_len = len;
+	uint32_t id = 0;
+	size_t j = 0;
 
 	buf = calloc(1, buf_len);
 	if (!buf) {
@@ -393,15 +424,38 @@ static void get_rsa_label(uint32_t oid, unsigned char **label, uint16_t len)
 		return;
 	}
 
-	/* Iterate through the pkcs11 key information */
+	/* Iterate through the pkcs11 RSA key information map */
 	for (size_t i = 0; i < pkcs11_rsa_idx; i++) {
-		if (memcmp(pkcs11_keys.rsa[i]->val, buf,
-			   pkcs11_keys.rsa[i]->len))
+		if (!memcmp(pkcs11_keys.rsa[i]->val, buf,
+			    pkcs11_keys.rsa[i]->len)) {
+			found[j++] = i;
+			continue;
+		}
+
+		/* SE PKCS11 imported keys */
+		if (memcmp(pkcs11_keys.rsa[i]->label, "SE_", 3))
 			continue;
 
-		asprintf((char **)label, "PKCS#11 Label: %s",
-			 pkcs11_keys.rsa[i]->label);
+		/*
+		 * SE PKCS#11 imported keys must have SE_ in the label followed
+		 * by the OID
+		 */
+		id = strtoul((void *)(pkcs11_keys.rsa[i]->label) + 3, NULL, 16);
+		if (oid == id)
+			found[j++] = i;
 	}
+
+	if (!j) {
+		free(buf);
+		return;
+	}
+
+	for (size_t i = 0; i < j; i++) {
+		strcat((char *)pad, (char *)pkcs11_keys.rsa[found[i]]->label);
+		strcat(pad, ", ");
+	}
+
+	asprintf((char **)label, "PKCS#11 Label: %s", pad);
 
 	free(buf);
 }

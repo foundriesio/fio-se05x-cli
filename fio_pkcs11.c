@@ -76,7 +76,6 @@ VARATTR_METHOD(LABEL, char);
 VARATTR_METHOD(MODULUS, CK_BYTE);
 ATTR_METHOD(KEY_TYPE, CK_KEY_TYPE);
 
-
 #define FILL_ATTR(attr, typ, val, len) \
 	{ (attr).type = (typ); (attr).pValue = (val); (attr).ulValueLen = len; }
 
@@ -483,30 +482,34 @@ int fio_pkcs11_create_key_list(unsigned char *token_label, unsigned char *pin)
 	CK_SLOT_ID slot = 0;
 	CK_ULONG count = 0;
 	int ret = -1;
-	CK_OBJECT_CLASS type = CKO_PRIVATE_KEY;
-	CK_ATTRIBUTE key_attr = {  CKA_CLASS, &type, sizeof(type)};
+	CK_OBJECT_CLASS class = CKO_PRIVATE_KEY;
+	CK_ATTRIBUTE key_attr = {  CKA_CLASS, &class, sizeof(class)};
 
 	if (!token_label || !pin)
 		return 0;
+
+	if (pkcs11_rsa_idx || pkcs11_ec_idx)
+		return -1;
 
 	if (get_optee_slot(&slot, token_label))
 		return ret;
 
 	if (C_OpenSession(slot, CKF_RW_SESSION | CKF_SERIAL_SESSION, NULL, 0,
 			  &session))
-		goto out;
+		goto open_err;
 
 	if (C_Login(session, CKU_USER, pin, strlen((const char *)pin)))
-		goto out;
+		goto login_err;
 
 	if (C_FindObjectsInit(session, &key_attr, 1))
-		goto out;
+		goto login_err;
 
 	for (;;) {
 		struct fio_key_info *info = NULL;
 		unsigned char *bytes = NULL;
 		char *label = NULL;
 		CK_ULONG size = 0;
+		CK_KEY_TYPE type;
 
 		if (C_FindObjects(session, &object, 1, &count))
 			goto out;
@@ -514,66 +517,60 @@ int fio_pkcs11_create_key_list(unsigned char *token_label, unsigned char *pin)
 		if (!count)
 			break;
 
-		switch (get_KEY_TYPE(session, object)) {
-		case CKK_RSA:
-			label = get_LABEL(session, object, NULL);
+		label = get_LABEL(session, object, NULL);
+		type = get_KEY_TYPE(session, object);
+
+		if (type == CKK_RSA &&
+		    pkcs11_rsa_idx < ARRAY_SIZE(pkcs11_keys.rsa))
 			bytes = get_MODULUS(session, object, &size);
-			if (pkcs11_rsa_idx >= ARRAY_SIZE(pkcs11_keys.rsa))
-				goto out;
-
-			if (bytes && size && label) {
-				info = calloc(1, sizeof(*info));
-				if (!info) goto out;
-
-				info->val = calloc(1, size);
-				if (!info->val) {
-					free(info);
-					goto out;
-				}
-
-				asprintf((char **)&info->label, "%s", label);
-				memcpy(info->val, bytes, size);
-				info->len = size;
-				/* populate info */
-				pkcs11_keys.rsa[pkcs11_rsa_idx++] = info;
-			}
-			break;
-		case CKK_EC:
-			label = get_LABEL(session, object, NULL);
+		else if (type == CKK_EC &&
+		    pkcs11_ec_idx < ARRAY_SIZE(pkcs11_keys.ec))
 			bytes = get_EC_POINT(session, object, &size);
-			if (pkcs11_ec_idx >= ARRAY_SIZE(pkcs11_keys.ec))
+
+		/*
+		 * SE PKCS#11 imported keys must have SE_ in the label followed
+		 * by the OID
+		 */
+		if (bytes || (label && memcmp(label, "SE_", 3))) {
+			info = calloc(1, sizeof(*info));
+			if (!info)
 				goto out;
-
-			if (bytes && size && label) {
-				info = calloc(1, sizeof(*info));
-				if (!info)
-					goto out;
-
-				info->val = calloc(1, size);
-				if (!info->val) {
-					free(info);
-					goto out;
-				}
-
-				asprintf((char**) &info->label, "%s", label);
-				memcpy(info->val, bytes, size);
-				info->len = size;
-				/* populate info */
-				pkcs11_keys.ec[pkcs11_ec_idx++] = info;
-			}
-			break;
-		default:
-			break;
 		}
+
+		if (bytes && size) {
+			info->val = calloc(1, size);
+			if (!info->val) {
+				free(info);
+				goto out;
+			}
+		}
+
+		if (bytes && size) {
+			memcpy(info->val, bytes, size);
+			info->len = size;
+
+			if (!label || !strlen(label))
+				label = "no-label";
+		}
+
+		if (label)
+			asprintf((char **)&info->label, "%s", label);
+
+		if (type == CKK_RSA)
+			pkcs11_keys.rsa[pkcs11_rsa_idx++] = info;
+		else if (type == CKK_EC)
+			pkcs11_keys.ec[pkcs11_ec_idx++] = info;
 	}
 
 	C_FindObjectsFinal(session);
-
 	ret = 0;
 out:
+	if (ret)
+		C_FindObjectsFinal(session);
+login_err:
 	if (session && C_CloseSession(session))
 		ret = -1;
-
+open_err:
 	if (put_optee_slot())
 		ret = -1;
 
