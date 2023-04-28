@@ -203,6 +203,34 @@ static inline char* get_name(enum se05x_oid_type type)
 	return "Invalid";
 }
 
+/* The Plug and Trust stack does not allow these objects to be deleted */
+static inline bool se05x_oid_reserved(uint32_t oid)
+{
+	if (SE05X_OBJID_SE05X_APPLET_RES_START ==
+	    SE05X_OBJID_SE05X_APPLET_RES_MASK(oid)) {
+		fprintf(stderr, "Not erasing 0x%08x (Reserved)\n", oid);
+		return true;
+	}
+
+	if (EX_SSS_OBJID_DEMO_AUTH_START == EX_SSS_OBJID_DEMO_AUTH_MASK(oid)) {
+		fprintf(stderr, "Not erasing 0x%08x (Demo Auth)\n", oid);
+		return true;
+	}
+
+	if (EX_SSS_OBJID_IOT_HUB_A_START == EX_SSS_OBJID_IOT_HUB_A_MASK(oid)) {
+		fprintf(stderr, "Not erasing 0x%08x (IoT Hub)\n", oid);
+		return true;
+	}
+
+	if (!SE05X_OBJID_TP_MASK(oid) && oid) {
+		fprintf(stderr, "Not erasing Trust Provisioned objects"
+			"0x%08x\n", oid);
+		return true;
+	}
+
+	return false;
+}
+
 enum se05x_tag {
 	SE05x_TAG_NA = 0,
 	SE05x_TAG_SESSION_ID = 0x10,

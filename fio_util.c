@@ -109,3 +109,24 @@ int fio_util_read_file(unsigned char *name, unsigned char **out, size_t *len)
 
 	return 0;
 }
+
+int fio_util_barray2str(unsigned char *in, size_t len, char *def, char **out)
+{
+	if (!len || !in) {
+		*out = def;
+
+		return 0;
+	}
+
+	/* Byte array to string */
+	*out = malloc(2 * len + 1);
+
+	if (!*out)
+		return -1;
+
+	for (size_t i = 0; i < len; i++)
+		sprintf(*out + 2 * i, "%02x", in[i]);
+
+	return 0;
+}
+

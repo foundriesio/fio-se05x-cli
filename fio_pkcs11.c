@@ -19,17 +19,14 @@
 #ifndef CKM_EC_EDWARDS_KEY_PAIR_GEN
 #define CKM_EC_EDWARDS_KEY_PAIR_GEN		(0x1055UL)
 #endif
-
 #ifndef CKK_EC_EDWARDS
 #define CKK_EC_EDWARDS				(0x40UL)
 #endif
-
 #define CKM_EC_MONTGOMERY_KEY_PAIR_GEN		(0x1056UL)
 #define CKK_EC_MONTGOMERY			(0x41UL)
 
-struct fio_pkcs11_keys pkcs11_keys;
-size_t pkcs11_rsa_idx;
-size_t pkcs11_ec_idx;
+struct fio_key_list rsa_list;
+struct fio_key_list ec_list;
 
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof(array[0]))
 
@@ -41,6 +38,7 @@ static TYPE get_##ATTR(CK_SESSION_HANDLE sess, CK_OBJECT_HANDLE obj)	\
 									\
 	if (C_GetAttributeValue(sess, obj, &attr, 1))			\
 		fprintf(stderr, "C_GetAttributeValue(" #ATTR ")");	\
+									\
 	return type;							\
 }
 
@@ -50,30 +48,38 @@ static TYPE * get_##ATTR(CK_SESSION_HANDLE sess, CK_OBJECT_HANDLE obj,	\
 {									\
 	CK_ATTRIBUTE attr = { CKA_##ATTR, NULL, 0 };			\
 	CK_RV rv;							\
+									\
 	if (pulCount)							\
 		*pulCount = 0;						\
+									\
 	rv = C_GetAttributeValue(sess, obj, &attr, 1);	 		\
 	if (rv == CKR_OK) {						\
 		if (attr.ulValueLen == (CK_ULONG)(-1))			\
 			return NULL;					\
+									\
 		if (!(attr.pValue = calloc(1, attr.ulValueLen + 1)))	\
 			return NULL;					\
+									\
 		rv = C_GetAttributeValue(sess, obj, &attr, 1);		\
 		if (attr.ulValueLen == (CK_ULONG)(-1)) {		\
 			free(attr.pValue);				\
 			return NULL;					\
 		}							\
+									\
 		if (pulCount)						\
 			*pulCount = attr.ulValueLen / sizeof(TYPE);	\
+									\
 	} else if (rv != CKR_ATTRIBUTE_TYPE_INVALID) {			\
 		fprintf(stderr, "Invalid");				\
 	}								\
+									\
 	return (TYPE *) attr.pValue;					\
 }
 
 VARATTR_METHOD(EC_POINT, unsigned char);
-VARATTR_METHOD(LABEL, char);
+VARATTR_METHOD(ID, unsigned char);
 VARATTR_METHOD(MODULUS, CK_BYTE);
+VARATTR_METHOD(LABEL, char);
 ATTR_METHOD(KEY_TYPE, CK_KEY_TYPE);
 
 #define FILL_ATTR(attr, typ, val, len) \
@@ -86,43 +92,64 @@ static const struct ec_curve_info {
 	size_t size;
 	CK_KEY_TYPE mechanism;
 } ec_curve[] = {
-	{ "secp192r1", "1.2.840.10045.3.1.1", "06082A8648CE3D030101", 192, 0 },
-	{ "prime192v1", "1.2.840.10045.3.1.1", "06082A8648CE3D030101", 192, 0 },
-	{ "prime192v2", "1.2.840.10045.3.1.2", "06082A8648CE3D030102", 192, 0 },
-	{ "prime192v3", "1.2.840.10045.3.1.3", "06082A8648CE3D030103", 192, 0 },
-	{ "nistp192", "1.2.840.10045.3.1.1", "06082A8648CE3D030101", 192, 0 },
-	{ "ansiX9p192r1", "1.2.840.10045.3.1.1", "06082A8648CE3D030101", 192, 0 },
+	{ "secp192r1", "1.2.840.10045.3.1.1",
+		"06082A8648CE3D030101", 192, 0 },
+	{ "prime192v1", "1.2.840.10045.3.1.1",
+		"06082A8648CE3D030101", 192, 0 },
+	{ "prime192v2", "1.2.840.10045.3.1.2",
+		"06082A8648CE3D030102", 192, 0 },
+	{ "prime192v3", "1.2.840.10045.3.1.3",
+		"06082A8648CE3D030103", 192, 0 },
+	{ "nistp192", "1.2.840.10045.3.1.1",
+		"06082A8648CE3D030101", 192, 0 },
+	{ "ansiX9p192r1", "1.2.840.10045.3.1.1",
+		"06082A8648CE3D030101", 192, 0 },
 
 	{ "secp224r1", "1.3.132.0.33", "06052b81040021", 224, 0 },
 	{ "nistp224",  "1.3.132.0.33", "06052b81040021", 224, 0 },
 
-	{ "prime256v1", "1.2.840.10045.3.1.7", "06082A8648CE3D030107", 256, 0 },
-	{ "secp256r1", "1.2.840.10045.3.1.7", "06082A8648CE3D030107", 256, 0 },
-	{ "ansiX9p256r1", "1.2.840.10045.3.1.7", "06082A8648CE3D030107", 256, 0 },
-	{ "frp256v1", "1.2.250.1.223.101.256.1", "060a2a817a01815f65820001", 256, 0 },
+	{ "prime256v1", "1.2.840.10045.3.1.7",
+		 "06082A8648CE3D030107", 256, 0 },
+	{ "secp256r1", "1.2.840.10045.3.1.7",
+		"06082A8648CE3D030107", 256, 0 },
+	{ "ansiX9p256r1", "1.2.840.10045.3.1.7",
+		"06082A8648CE3D030107", 256, 0 },
+	{ "frp256v1", "1.2.250.1.223.101.256.1",
+		"060a2a817a01815f65820001", 256, 0 },
 
-	{ "secp384r1", "1.3.132.0.34", "06052B81040022", 384, 0 },
-	{ "prime384v1", "1.3.132.0.34", "06052B81040022", 384, 0 },
-	{ "ansiX9p384r1", "1.3.132.0.34", "06052B81040022", 384, 0 },
+	{ "secp384r1", "1.3.132.0.34",
+		"06052B81040022", 384, 0 },
+	{ "prime384v1", "1.3.132.0.34",
+		"06052B81040022", 384, 0 },
+	{ "ansiX9p384r1", "1.3.132.0.34",
+		"06052B81040022", 384, 0 },
 
 	{ "prime521v1", "1.3.132.0.35", "06052B81040023", 521, 0 },
 	{ "secp521r1", "1.3.132.0.35", "06052B81040023", 521, 0 },
 	{ "nistp521", "1.3.132.0.35", "06052B81040023", 521, 0 },
 
-	{ "brainpoolP192r1", "1.3.36.3.3.2.8.1.1.3", "06092B2403030208010103", 192, 0 },
-	{ "brainpoolP224r1", "1.3.36.3.3.2.8.1.1.5", "06092B2403030208010105", 224, 0 },
-	{ "brainpoolP256r1", "1.3.36.3.3.2.8.1.1.7", "06092B2403030208010107", 256, 0 },
-	{ "brainpoolP320r1", "1.3.36.3.3.2.8.1.1.9", "06092B2403030208010109", 320, 0 },
-	{ "brainpoolP384r1", "1.3.36.3.3.2.8.1.1.11", "06092B240303020801010B", 384, 0 },
-	{ "brainpoolP512r1", "1.3.36.3.3.2.8.1.1.13", "06092B240303020801010D", 512, 0 },
+	{ "brainpoolP192r1", "1.3.36.3.3.2.8.1.1.3",
+		"06092B2403030208010103", 192, 0 },
+	{ "brainpoolP224r1", "1.3.36.3.3.2.8.1.1.5",
+		"06092B2403030208010105", 224, 0 },
+	{ "brainpoolP256r1", "1.3.36.3.3.2.8.1.1.7",
+		"06092B2403030208010107", 256, 0 },
+	{ "brainpoolP320r1", "1.3.36.3.3.2.8.1.1.9",
+		"06092B2403030208010109", 320, 0 },
+	{ "brainpoolP384r1", "1.3.36.3.3.2.8.1.1.11",
+		"06092B240303020801010B", 384, 0 },
+	{ "brainpoolP512r1", "1.3.36.3.3.2.8.1.1.13",
+		"06092B240303020801010D", 512, 0 },
 
 	{ "secp192k1", "1.3.132.0.31", "06052B8104001F", 192, 0 },
 	{ "secp256k1", "1.3.132.0.10", "06052B8104000A", 256, 0 },
 	{ "secp521k1", "1.3.132.0.35", "06052B81040023", 521, 0 },
 
-	{ "edwards25519", "1.3.6.1.4.1159.15.1", "130c656477617264733235353139", 255,
+	{ "edwards25519", "1.3.6.1.4.1159.15.1",
+		 "130c656477617264733235353139", 255,
 		CKM_EC_EDWARDS_KEY_PAIR_GEN },
-	{ "curve25519", "1.3.6.1.4.3029.1.5.1", "130b63757276653235353139", 255,
+	{ "curve25519", "1.3.6.1.4.3029.1.5.1",
+		"130b63757276653235353139", 255,
 		CKM_EC_MONTGOMERY_KEY_PAIR_GEN },
 
 	{ NULL, NULL, NULL, 0, 0 },
@@ -477,19 +504,16 @@ out:
 
 int fio_pkcs11_create_key_list(unsigned char *token_label, unsigned char *pin)
 {
+	CK_OBJECT_CLASS class = CKO_PRIVATE_KEY;
+	CK_ATTRIBUTE key_attr = {  CKA_CLASS, &class, sizeof(class) };
 	CK_SESSION_HANDLE session = CK_INVALID_HANDLE;
 	CK_OBJECT_HANDLE object;
 	CK_SLOT_ID slot = 0;
 	CK_ULONG count = 0;
 	int ret = -1;
-	CK_OBJECT_CLASS class = CKO_PRIVATE_KEY;
-	CK_ATTRIBUTE key_attr = {  CKA_CLASS, &class, sizeof(class)};
 
 	if (!token_label || !pin)
 		return 0;
-
-	if (pkcs11_rsa_idx || pkcs11_ec_idx)
-		return -1;
 
 	if (get_optee_slot(&slot, token_label))
 		return ret;
@@ -504,9 +528,13 @@ int fio_pkcs11_create_key_list(unsigned char *token_label, unsigned char *pin)
 	if (C_FindObjectsInit(session, &key_attr, 1))
 		goto login_err;
 
+	LIST_INIT(&rsa_list);
+	LIST_INIT(&ec_list);
+
 	for (;;) {
 		struct fio_key_info *info = NULL;
 		unsigned char *bytes = NULL;
+		unsigned char *id = NULL;
 		char *label = NULL;
 		CK_ULONG size = 0;
 		CK_KEY_TYPE type;
@@ -517,49 +545,44 @@ int fio_pkcs11_create_key_list(unsigned char *token_label, unsigned char *pin)
 		if (!count)
 			break;
 
-		label = get_LABEL(session, object, NULL);
 		type = get_KEY_TYPE(session, object);
 
-		if (type == CKK_RSA &&
-		    pkcs11_rsa_idx < ARRAY_SIZE(pkcs11_keys.rsa))
-			bytes = get_MODULUS(session, object, &size);
-		else if (type == CKK_EC &&
-		    pkcs11_ec_idx < ARRAY_SIZE(pkcs11_keys.ec))
-			bytes = get_EC_POINT(session, object, &size);
-
-		/*
-		 * SE PKCS#11 imported keys must have SE_ in the label followed
-		 * by the OID
-		 */
-		if (bytes || (label && memcmp(label, "SE_", 3))) {
-			info = calloc(1, sizeof(*info));
-			if (!info)
-				goto out;
-		}
-
-		if (bytes && size) {
-			info->val = calloc(1, size);
-			if (!info->val) {
-				free(info);
-				goto out;
-			}
-		}
-
-		if (bytes && size) {
-			memcpy(info->val, bytes, size);
-			info->len = size;
-
-			if (!label || !strlen(label))
-				label = "no-label";
-		}
-
-		if (label)
-			asprintf((char **)&info->label, "%s", label);
-
 		if (type == CKK_RSA)
-			pkcs11_keys.rsa[pkcs11_rsa_idx++] = info;
+			bytes = get_MODULUS(session, object, &size);
 		else if (type == CKK_EC)
-			pkcs11_keys.ec[pkcs11_ec_idx++] = info;
+			bytes = get_EC_POINT(session, object, &size);
+		else
+			continue;
+
+		if (!bytes || !size)
+			continue;
+
+		info = calloc(1, sizeof(*info));
+		if (!info)
+			goto out;
+
+		/* Copy key values */
+		info->val = bytes;
+		info->len = size;
+
+		/* Copy label */
+		label = get_LABEL(session, object, NULL);
+		if (!label || !strlen(label))
+			label = EMPTY_STR;
+		info->label = label;
+
+		/* Copy id */
+		id = get_ID(session, object, &size);
+		if (fio_util_barray2str(id, size, EMPTY_STR, &info->id))
+			goto out;
+		if (id)
+			free(id);
+
+		/* Add it to a map */
+		if (type == CKK_RSA)
+			LIST_INSERT_HEAD(&rsa_list, info, link);
+		else if (type == CKK_EC)
+			LIST_INSERT_HEAD(&ec_list, info, link);
 	}
 
 	C_FindObjectsFinal(session);

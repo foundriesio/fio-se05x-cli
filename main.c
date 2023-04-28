@@ -339,17 +339,32 @@ error:
 	return -EINVAL;
 }
 
-static void get_ec_label(uint32_t oid, unsigned char **label, uint16_t len)
+static void get_pkcs11_info(uint32_t oid, uint32_t type, uint16_t len,
+			    unsigned char **label)
 {
+	struct fio_key_list *list = NULL;
+	struct fio_key_info *info = NULL;
+	struct fio_key_info *safe = NULL;
 	char pad[4096] = { '\0' };
-	int found[100] = { };
 	unsigned char *buf = NULL;
+	size_t der_offset = 0;
 	size_t buf_len = 0;
-	uint32_t id = 0;
-	size_t j = 0;
 
-	/* Increase for DER extra data */
-	buf_len = 10 * len;
+	if (type == EC_KEY_PAIR) {
+		/* EC point is retrieved in DER format, we need to skip tag */
+		buf_len = 10 * len;
+		der_offset = 2;
+		list = &ec_list;
+	}
+	else if (type == RSA_KEY_PAIR) {
+		buf_len = len;
+		list = &rsa_list;
+	}
+	else
+		return;
+
+	if (LIST_EMPTY(list))
+		return;
 
 	buf = calloc(1, buf_len);
 	if (!buf) {
@@ -357,123 +372,56 @@ static void get_ec_label(uint32_t oid, unsigned char **label, uint16_t len)
 		return;
 	}
 
-	if (object_get(oid, 0, 0, buf, &buf_len)) {
-		fprintf(stderr, "Object 0x%x cant be retrieved!\n", oid);
-		free(buf);
-		return;
+	if (type == EC_KEY_PAIR) {
+		if (object_get(oid, 0, 0, buf, &buf_len)) {
+			fprintf(stderr, "Object 0x%x cant be retrieved\n", oid);
+			free(buf);
+			return;
+		}
+	} else {
+		if (object_rsa_get(oid, 0, 0, buf, &buf_len)) {
+			fprintf(stderr, "Object 0x%x cant be retrieved\n", oid);
+			free(buf);
+			return;
+		}
 	}
-	/* Iterate through the pkcs11 EC key information map */
-	for (size_t i = 0; i < pkcs11_ec_idx; i++) {
+
+	/* Allow removing items for the list */
+	LIST_FOREACH_SAFE(info, list, link, safe) {
 		/*
 		 * WARNING:
-		 * Remove DER header info (might vary, 2 seems ok) !!
+		 * Remove DER header info (might vary, 2 chosen empirically)
 		 */
-		if (!memcmp(&pkcs11_keys.ec[i]->val[2], buf,
-			    pkcs11_keys.ec[i]->len)) {
-			found[j++] = i;
+		if (!memcmp(&info->val[der_offset], buf, info->len)) {
+			/* Push information */
+			pkcs11_info2pad(pad, info);
+
+			LIST_REMOVE(info, link);
+			pkcs11_free_info(info);
 			continue;
 		}
 
 		/* SE PKCS11 imported keys */
-		if (!pkcs11_keys.ec[i]->label ||
-		    memcmp(pkcs11_keys.ec[i]->label, "SE_", 3))
+		if (!info->label || memcmp(info->label, "SE_", 3))
 			continue;
-
 		/*
 		 * SE PKCS#11 imported keys must have SE_ in the label followed
 		 * by the OID
 		 */
-		id = strtoul((void *)(pkcs11_keys.ec[i]->label) + 3, NULL, 16);
-		if (oid == id)
-			found[j++] = i;
-	}
+		if (oid == strtoul((void *)(info->label) + 3, NULL, 16)) {
+			/* Push information */
+			pkcs11_info2pad(pad, info);
 
-	if (!j) {
-		free(buf);
-		return;
-	}
-
-	for (size_t i = 0; i < j; i++) {
-		strcat((char *)pad, (char *)pkcs11_keys.ec[found[i]]->label);
-		strcat(pad, ", ");
-	}
-
-	asprintf((char **)label, "PKCS#11 Label: %s", pad);
-
-	free(buf);
-}
-
-static void get_rsa_label(uint32_t oid, unsigned char **label, uint16_t len)
-{
-	char pad[4096] = { '\0' };
-	int found[100] = { };
-	unsigned char *buf = NULL;
-	size_t buf_len = len;
-	uint32_t id = 0;
-	size_t j = 0;
-
-	buf = calloc(1, buf_len);
-	if (!buf) {
-		fprintf(stderr, "Error, not enough memory\n");
-		return;
-	}
-
-	if (object_rsa_get(oid, 0, 0, buf, &buf_len)) {
-		fprintf(stderr, "Object 0x%x cant be retrieved!\n", oid);
-		free(buf);
-		return;
-	}
-
-	/* Iterate through the pkcs11 RSA key information map */
-	for (size_t i = 0; i < pkcs11_rsa_idx; i++) {
-		if (!memcmp(pkcs11_keys.rsa[i]->val, buf,
-			    pkcs11_keys.rsa[i]->len)) {
-			found[j++] = i;
+			LIST_REMOVE(info, link);
+			pkcs11_free_info(info);
 			continue;
 		}
-
-		/* SE PKCS11 imported keys */
-		if (!pkcs11_keys.rsa[i]->label ||
-		    memcmp(pkcs11_keys.rsa[i]->label, "SE_", 3))
-			continue;
-
-		/*
-		 * SE PKCS#11 imported keys must have SE_ in the label followed
-		 * by the OID
-		 */
-		id = strtoul((void *)(pkcs11_keys.rsa[i]->label) + 3, NULL, 16);
-		if (oid == id)
-			found[j++] = i;
 	}
 
-	if (!j) {
-		free(buf);
-		return;
-	}
-
-	for (size_t i = 0; i < j; i++) {
-		strcat((char *)pad, (char *)pkcs11_keys.rsa[found[i]]->label);
-		strcat(pad, ", ");
-	}
-
-	asprintf((char **)label, "PKCS#11 Label: %s", pad);
+	if (strlen(pad))
+		asprintf((char **)label, "PKCS#11 (lbl,id): %s", pad);
 
 	free(buf);
-}
-
-static void get_pkcs11_label(uint32_t oid, uint32_t type, uint16_t len,
-			     unsigned char **label)
-{
-	switch (type) {
-	case EC_KEY_PAIR:
-		get_ec_label(oid, label, len);
-		break;
-	case RSA_KEY_PAIR:
-		get_rsa_label(oid, label, len);
-		break;
-	default:
-		break;
-	}
 }
 
 static int get_certificate(uint32_t oid, unsigned char **der, size_t *der_len)
@@ -586,14 +534,15 @@ static int do_key(unsigned char *token, unsigned char *nxp_id,
 	return 0;
 }
 
-static int do_list(unsigned char *nxp_id, unsigned char *token_label, unsigned char *pin)
+static int do_list(unsigned char *nxp_id, unsigned char *token_label,
+		   unsigned char *pin)
 {
 	uint8_t *list = malloc(4096);
 	size_t length = 4096;
 	uint32_t type = 0;
 	uint16_t size = 0;
 	uint32_t *p = (uint32_t *)list;
-	unsigned char *pkcs11_label = NULL;
+	unsigned char *pkcs11_str = NULL;
 	uint32_t oid = strtoul((char *)nxp_id, NULL, 16);
 
 	if (!strncmp((char *)nxp_id, "all", strlen("all")))
@@ -612,6 +561,7 @@ static int do_list(unsigned char *nxp_id, unsigned char *token_label, unsigned c
 
 	for (size_t i = 0; i < length / sizeof(uint32_t); i++, p++) {
 		uint32_t id = bswap32(*p);
+		pkcs11_str = NULL;
 		size = 0;
 
 		if (oid && (oid != id))
@@ -623,16 +573,15 @@ static int do_list(unsigned char *nxp_id, unsigned char *token_label, unsigned c
 		if ((type != UserID) && object_size(id, &size))
 			continue;
 
-		if (token_label && pin)
-			get_pkcs11_label(id, type, size, &pkcs11_label);
+		if (pkcs11_info_available())
+			get_pkcs11_info(id, type, size, &pkcs11_str);
 
 		fprintf(stderr, "Key-Id: 0x%x\t%-20s [%5d bits] %c %s\n",
 			id, get_name(type), 8 * size,
 			TEE_OID(id) ? '*' : ' ',
-			pkcs11_label ? pkcs11_label : (unsigned char *)" ");
+			pkcs11_str ? pkcs11_str : (unsigned char *)" ");
 
-		free(pkcs11_label);
-		pkcs11_label = NULL;
+		free(pkcs11_str);
 	}
 
 	free(list);
@@ -705,24 +654,9 @@ init:
 		if (oid != id)
 			continue;
 delete:
-		/* Filter as per the Plug and Trust */
-		if (SE05X_OBJID_SE05X_APPLET_RES_START ==
-		    SE05X_OBJID_SE05X_APPLET_RES_MASK(id)) {
-			fprintf(stderr, "Not erasing 0x%08x (Reserved)\n", id);
+		/* Plug-and-Trust stack prevents these objects from deletion */
+		if (se05x_oid_reserved(id))
 			continue;
-		} else if (EX_SSS_OBJID_DEMO_AUTH_START ==
-			   EX_SSS_OBJID_DEMO_AUTH_MASK(id)) {
-			fprintf(stderr, "Not erasing 0x%08x (Demo Auth)\n", id);
-			continue;
-		} else if (EX_SSS_OBJID_IOT_HUB_A_START ==
-			   EX_SSS_OBJID_IOT_HUB_A_MASK(id)) {
-			fprintf(stderr,"Not erasing 0x%08x (IoT Hub)\n", id);
-			continue;
-		} else if (!SE05X_OBJID_TP_MASK(id) && id) {
-			fprintf(stderr, "Not erasing Trust Provisioned objects"
-					"0x%08x\n", id);
-			continue;
-		}
 
 		err = object_delete(id);
 		if (!err)
