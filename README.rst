@@ -91,3 +91,5 @@ Have fun::
 
 
 Foundries.io
+
+**NOTE: Due to unclear Copyright ownership in AI generated code, contributions using these tools will not be accepted in this repository**
