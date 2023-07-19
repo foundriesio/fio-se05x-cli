@@ -3,6 +3,7 @@
  * Copyright (c) 2022, Foundries.io Ltd.
  * Author: Jorge Ramirez-Ortiz <jorge@foundries.io>
  */
+#include <openssl/bn.h>
 #include <openssl/crypto.h>
 #include <openssl/x509.h>
 #include <stdio.h>
@@ -65,6 +66,26 @@ int fio_ssl_print_cert(uint8_t *der, size_t len)
 		      XN_FLAG_SEP_CPLUS_SPC | ASN1_STRFLGS_UTF8_CONVERT, 0);
 
 	BIO_free_all(b);
+
+	return 0;
+}
+
+int fio_ssl_bn_hex2dec(char **str)
+{
+	BIGNUM *bn = BN_new();
+
+	if (!bn)
+		return -1;
+
+	if (!BN_hex2bn(&bn, *str)) {
+		BN_free(bn);
+		return -1;
+	}
+
+	free(*str);
+
+	*str = BN_bn2dec(bn);
+	BN_free(bn);
 
 	return 0;
 }

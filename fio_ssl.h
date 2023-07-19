@@ -25,5 +25,6 @@ struct fio_cert_info {
 
 int fio_ssl_get_cert_info(struct fio_cert_info *info, unsigned char *der, size_t len);
 int fio_ssl_print_cert(unsigned char *der, size_t len);
+int fio_ssl_bn_hex2dec(char **str);
 
 #endif

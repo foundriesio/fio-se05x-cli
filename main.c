@@ -692,17 +692,26 @@ static int do_show(void)
 {
 	uint8_t uid[SE050_UNIQUE_ID_LEN];
 	size_t len = sizeof(uid);
-	size_t i = 0;
+	char *str = NULL;
 	int ret;
 
 	ret = object_get(SE05X_UNIQUE_ID, 0, SE050_UNIQUE_ID_LEN, uid, &len);
 	if (ret)
 		return ret;
 
-	fprintf(stderr, "SE05X UID: ");
-	for (i = 0; i < SE050_UNIQUE_ID_LEN; i++)
-		fprintf(stderr, "%02x", uid[i]);
-	fprintf(stderr, "\n");
+	ret = fio_util_barray2str(uid, len, NULL, &str);
+	if (ret)
+		return ret;
+
+	fprintf(stderr, "SE05X UID [hex]: %s\n", str);
+
+	ret = fio_ssl_bn_hex2dec(&str);
+	if (ret)
+		return ret;
+
+	fprintf(stderr, "SE05X UID [dec]: %s\n", str);
+
+	free(str);
 
 	return 0;
 }
