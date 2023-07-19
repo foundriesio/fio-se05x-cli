@@ -15,6 +15,10 @@
 #define EX_SSS_OBJID_IOT_HUB_A_START            (0xF0000000u)
 #define EX_SSS_OBJID_IOT_HUB_A_MASK(_x)		(0xF0000000u & (_x))
 
+/* The Unique ID object */
+#define SE05X_UNIQUE_ID				0x7FFF0206
+#define SE050_UNIQUE_ID_LEN			18
+
 /* OP-TEE: range of values created by the OP-TEE driver */
 #define TEE_OID_MIN	((uint32_t)(0x00000001))
 #define TEE_OID_MAX	((uint32_t)(TEE_OID_MIN + 0x7BFFFFFE))
