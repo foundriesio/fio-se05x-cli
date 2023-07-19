@@ -72,6 +72,10 @@ Examples of usage
     fio-se05x-cli --delete-objects all
     fio-se05x-cli --delete-objects 0x67981234
 
+* Show the SE05X Unique Identifier::
+
+     fio-se05x-cli --getuid
+
 
 Use the optional --se050 if the device is an SE050
 

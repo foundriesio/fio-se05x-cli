@@ -688,6 +688,25 @@ delete:
 	return 0;
 }
 
+static int do_show(void)
+{
+	uint8_t uid[SE050_UNIQUE_ID_LEN];
+	size_t len = sizeof(uid);
+	size_t i = 0;
+	int ret;
+
+	ret = object_get(SE05X_UNIQUE_ID, 0, SE050_UNIQUE_ID_LEN, uid, &len);
+	if (ret)
+		return ret;
+
+	fprintf(stderr, "SE05X UID: ");
+	for (i = 0; i < SE050_UNIQUE_ID_LEN; i++)
+		fprintf(stderr, "%x", uid[i]);
+	fprintf(stderr, "\n");
+
+	return 0;
+}
+
 static const struct option options[] = {
 	{
 #define help_opt 0
@@ -768,6 +787,12 @@ static const struct option options[] = {
 		.flag = NULL,
 	},
 	{
+#define show_uid_opt 13
+		.name = "getuid",
+		.has_arg = 0,
+		.flag = NULL,
+	},
+	{
 		.name = NULL,
 	},
 };
@@ -814,7 +839,9 @@ static void usage(void)
 		"\t--factory-reset \tThis option will delete OPTEE and EL2G created keys and certificates\n"
 		"\t[--se050]\n\n");
 
-
+	fprintf(stderr, "Display the Unique Identifier. \n"
+		"\t--getuid \tThis option will display the Secure Element Unique Identifier\n"
+		"\t[--se050]\n\n");
 }
 
 int main(int argc, char *argv[])
@@ -828,6 +855,7 @@ int main(int argc, char *argv[])
 	bool do_import_cert = false;
 	bool do_import_key = false;
 	bool do_show_cert = false;
+	bool do_show_uid = false;
 	int lindex, opt;
 
 	/* Initialize TLV size */
@@ -891,11 +919,17 @@ int main(int argc, char *argv[])
 			do_factory_reset = true;
 			nxp_id = (unsigned char *)"reset";
 			break;
+		case show_uid_opt:
+			do_show_uid = true;
+			break;
 		default:
 			usage();
 			exit(1);
 		}
 	}
+
+	if (do_show_uid)
+		return do_show();
 
 	if (do_list_objects)
 		return do_list(nxp_id, token, pin);
