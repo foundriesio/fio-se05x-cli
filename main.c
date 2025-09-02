@@ -356,7 +356,7 @@ static void get_pkcs11_info(uint32_t oid, uint32_t type, uint16_t len,
 		der_offset = 2;
 		list = &ec_list;
 	}
-	else if (type == RSA_KEY_PAIR) {
+	else if ((type == RSA_KEY_PAIR) || (type == RSA_KEY_PAIR_CRT)) {
 		buf_len = len;
 		list = &rsa_list;
 	}
